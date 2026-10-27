@@ -444,6 +444,31 @@ El archivo [`k8s/cluster.yaml`](k8s/cluster.yaml) define el clúster
 aplicación y las subredes públicas para los balanceadores. Los placeholders
 evitan guardar IDs específicos de una sesión del Learner Lab en el repositorio.
 
+#### Instalar `eksctl` en AWS CloudShell
+
+En AWS CloudShell, instala la versión más reciente de `eksctl` para la
+arquitectura `amd64`, agrega el binario al `PATH` y verifica que responda:
+
+```bash
+# 1. Descargar e instalar eksctl para la arquitectura de CloudShell.
+ARCH=amd64
+PLATFORM=$(uname -s)_$ARCH
+curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
+tar -xzf "eksctl_$PLATFORM.tar.gz" -C /tmp
+rm "eksctl_$PLATFORM.tar.gz"
+mkdir -p ~/.local/bin
+mv /tmp/eksctl ~/.local/bin/
+export PATH="$HOME/.local/bin:$PATH"
+echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
+
+# 2. Verificar que el comando responda.
+eksctl version
+```
+
+Ejecuta estos comandos desde la raíz del repositorio para que la ruta del
+archivo declarativo sea `k8s/cluster.yaml`. Si CloudShell contiene el archivo
+en el directorio actual, también puedes usar `-f cluster.yaml`.
+
 Antes de crear el clúster, resuelve los IDs de la VPC, subredes, Security Group
 de EKS y el ARN del rol preexistente `LabRole`:
 
@@ -472,7 +497,11 @@ sed -i \
   k8s/cluster.yaml
 
 # Aprovisionamiento declarativo exacto del clúster.
+# 3. Lanzar la creación del clúster EKS con el archivo cluster.yaml.
 eksctl create cluster -f k8s/cluster.yaml
+
+# Alternativa si previamente copiaste k8s/cluster.yaml al directorio actual:
+# eksctl create cluster -f cluster.yaml
 
 # Verificación post-creación solicitada.
 aws eks describe-cluster \
