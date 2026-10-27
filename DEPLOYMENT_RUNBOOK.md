@@ -317,27 +317,58 @@ export RDS_ENDPOINT="$(aws rds describe-db-instances \
 printf 'RDS_ENDPOINT=%s\n' "$RDS_ENDPOINT"
 ```
 
-### 3.4 Inicializar y validar la base de datos
+### 3.4 Inicialización de Base de Datos en Red Privada (Zero-Trust)
 
-El cliente `mysql` debe ejecutarse desde una máquina con conectividad a la
-subred privada (por ejemplo, un bastion temporal o una sesión SSM autorizada).
+La inicialización se realiza desde un Pod cliente efímero dentro de EKS, en
+lugar de hacer la instancia RDS pública con `--publicly-accessible`. Esta
+decisión:
+
+- evita exponer el puerto `3306` a Internet;
+- respeta el encadenamiento de Security Groups
+  (`freshbox-sg-rds <- freshbox-sg-eks`), donde RDS solo acepta conexiones
+  originadas desde EKS; y
+- aprovecha la conectividad intra-VPC entre las subredes privadas de la
+  aplicación y de datos.
+
+El Pod `rds-client` se elimina automáticamente con `--rm` después de cada
+operación. El script obtiene el endpoint dinámicamente mediante AWS CLI y
+canaliza [init.sql](init.sql) al cliente MySQL que se ejecuta dentro del Pod:
 
 ```bash
-mysql \
-  --host="$RDS_ENDPOINT" \
-  --port=3306 \
-  --user="$DB_USER" \
-  --password \
-  "$DB_NAME" < init.sql
-
-mysql \
-  --host="$RDS_ENDPOINT" \
-  --port=3306 \
-  --user="$DB_USER" \
-  --password \
-  "$DB_NAME" \
-  --execute="SELECT * FROM productos;"
+chmod +x scripts/db-init-k8s.sh
+./scripts/db-init-k8s.sh
 ```
+
+También se pueden ejecutar las operaciones manualmente:
+
+```bash
+export REGION="us-east-1"
+export DB_ENDPOINT="$(aws rds describe-db-instances \
+  --db-instance-identifier freshbox-db \
+  --region "$REGION" \
+  --query 'DBInstances[0].Endpoint.Address' \
+  --output text)"
+export DB_NAME="freshbox"
+export DB_USER="alumno"
+export DB_PASS="alumno123"
+
+kubectl run rds-client --rm -i --restart=Never \
+  --image=mysql:8.0 \
+  --namespace=freshbox \
+  --env="MYSQL_PWD=$DB_PASS" \
+  -- mysql -h "$DB_ENDPOINT" -u "$DB_USER" "$DB_NAME" < init.sql
+
+kubectl run rds-client --rm -i --restart=Never \
+  --image=mysql:8.0 \
+  --namespace=freshbox \
+  --env="MYSQL_PWD=$DB_PASS" \
+  -- mysql -h "$DB_ENDPOINT" -u "$DB_USER" "$DB_NAME" \
+  -e "SELECT id, nombre, precio, stock FROM productos;"
+```
+
+> El usuario y contraseña solicitados corresponden a la configuración actual
+> de la EP2. Para un entorno real, reemplaza estos valores por un secreto
+> gestionado y no los almacenes en texto plano.
 
 ## 4. Fase 3: pipeline CI/CD a Amazon ECR
 
