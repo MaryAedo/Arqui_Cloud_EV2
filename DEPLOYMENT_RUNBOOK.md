@@ -99,22 +99,22 @@ Balancer Controller:
 ```bash
 PUBLIC_SUBNET_A="$(aws ec2 create-subnet \
   --vpc-id "$VPC_ID" --cidr-block 10.0.0.0/26 --availability-zone "$AZ1" \
-  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=${PROJECT}-public-a},{Key=kubernetes.io/role/elb,Value=1}]" \
+  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=Public-Subnet-1A},{Key=kubernetes.io/role/elb,Value=1}]" \
   --query 'Subnet.SubnetId' --output text)"
 
 PUBLIC_SUBNET_B="$(aws ec2 create-subnet \
   --vpc-id "$VPC_ID" --cidr-block 10.0.0.64/26 --availability-zone "$AZ2" \
-  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=${PROJECT}-public-b},{Key=kubernetes.io/role/elb,Value=1}]" \
+  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=Public-Subnet-1B},{Key=kubernetes.io/role/elb,Value=1}]" \
   --query 'Subnet.SubnetId' --output text)"
 
 APP_SUBNET_A="$(aws ec2 create-subnet \
   --vpc-id "$VPC_ID" --cidr-block 10.0.1.0/24 --availability-zone "$AZ1" \
-  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=${PROJECT}-app-a},{Key=kubernetes.io/role/internal-elb,Value=1}]" \
+  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=Private-App-1A},{Key=kubernetes.io/role/internal-elb,Value=1}]" \
   --query 'Subnet.SubnetId' --output text)"
 
 APP_SUBNET_B="$(aws ec2 create-subnet \
   --vpc-id "$VPC_ID" --cidr-block 10.0.2.0/24 --availability-zone "$AZ2" \
-  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=${PROJECT}-app-b},{Key=kubernetes.io/role/internal-elb,Value=1}]" \
+  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=Private-App-1B},{Key=kubernetes.io/role/internal-elb,Value=1}]" \
   --query 'Subnet.SubnetId' --output text)"
 
 DATA_SUBNET_A="$(aws ec2 create-subnet \
@@ -465,45 +465,79 @@ echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
 eksctl version
 ```
 
-Ejecuta la sustitución de placeholders desde la raíz del repositorio. Después
-entra en `k8s/` para ejecutar los comandos solicitados sobre `cluster.yaml`.
-
-Antes de crear el clúster, resuelve los IDs de la VPC, subredes, Security Group
-de EKS y el ARN del rol preexistente `LabRole`:
+En AWS Academy, el rol `LabRole` ya existe y debe reutilizarse. El siguiente
+flujo recupera los recursos por sus tags y genera un `cluster.yaml` específico
+para la sesión actual, evitando llamadas de `eksctl` a `iam:CreateRole`.
+Ejecuta el bloque desde la raíz del repositorio:
 
 ```bash
-export CLUSTER_NAME="freshbox-cluster"
-export REGION="us-east-1"
-export VPC_ID="${VPC_ID:?Define VPC_ID de la Fase 1}"
-export APP_SUBNET_A="${APP_SUBNET_A:?Define APP_SUBNET_A de la Fase 1}"
-export APP_SUBNET_B="${APP_SUBNET_B:?Define APP_SUBNET_B de la Fase 1}"
-export PUBLIC_SUBNET_A="${PUBLIC_SUBNET_A:?Define PUBLIC_SUBNET_A de la Fase 1}"
-export PUBLIC_SUBNET_B="${PUBLIC_SUBNET_B:?Define PUBLIC_SUBNET_B de la Fase 1}"
-export SG_EKS="${SG_EKS:?Define SG_EKS de la Fase 1}"
-export LAB_ROLE_ARN="$(aws iam get-role \
-  --role-name LabRole \
-  --query 'Role.Arn' \
-  --output text)"
+cd ~/Arqui_Cloud_EV2
+REGION="us-east-1"
+CLUSTER_NAME="freshbox-cluster"
+ACCOUNT_ID=$(aws sts get-caller-identity \
+  --query Account --output text)
 
-sed -i \
-  -e "s#VPC_ID_PLACEHOLDER#$VPC_ID#g" \
-  -e "s#APP_SUBNET_A_PLACEHOLDER#$APP_SUBNET_A#g" \
-  -e "s#APP_SUBNET_B_PLACEHOLDER#$APP_SUBNET_B#g" \
-  -e "s#PUBLIC_SUBNET_A_PLACEHOLDER#$PUBLIC_SUBNET_A#g" \
-  -e "s#PUBLIC_SUBNET_B_PLACEHOLDER#$PUBLIC_SUBNET_B#g" \
-  -e "s#LAB_ROLE_ARN_PLACEHOLDER#$LAB_ROLE_ARN#g" \
-  -e "s#SG_EKS_PLACEHOLDER#$SG_EKS#g" \
-  k8s/cluster.yaml
+# 1. Recuperar los IDs reales de red.
+VPC_ID=$(aws ec2 describe-vpcs \
+  --filters "Name=tag:Name,Values=freshbox-vpc" \
+  --query "Vpcs[0].VpcId" --output text --region "$REGION")
+PUB_1A=$(aws ec2 describe-subnets \
+  --filters "Name=tag:Name,Values=Public-Subnet-1A" \
+  --query "Subnets[0].SubnetId" --output text --region "$REGION")
+PUB_1B=$(aws ec2 describe-subnets \
+  --filters "Name=tag:Name,Values=Public-Subnet-1B" \
+  --query "Subnets[0].SubnetId" --output text --region "$REGION")
+APP_1A=$(aws ec2 describe-subnets \
+  --filters "Name=tag:Name,Values=Private-App-1A" \
+  --query "Subnets[0].SubnetId" --output text --region "$REGION")
+APP_1B=$(aws ec2 describe-subnets \
+  --filters "Name=tag:Name,Values=Private-App-1B" \
+  --query "Subnets[0].SubnetId" --output text --region "$REGION")
+SG_EKS=$(aws ec2 describe-security-groups \
+  --filters "Name=group-name,Values=freshbox-sg-eks" \
+  --query "SecurityGroups[0].GroupId" --output text --region "$REGION")
 
-cd k8s
+# 2. Generar cluster.yaml para AWS Academy sin iam:CreateRole.
+cat <<EOF > cluster.yaml
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
 
-# 1. Actualizar la versión a 1.31 en cluster.yaml.
-sed -i 's/version: "1.30"/version: "1.31"/' cluster.yaml
+metadata:
+  name: freshbox-cluster
+  region: $REGION
+  version: "1.31"
 
-# Verificar que quedó en 1.31.
-grep "version:" cluster.yaml
+iam:
+  serviceRoleARN: "arn:aws:iam::${ACCOUNT_ID}:role/LabRole"
 
-# 2. Lanzar la creación del clúster EKS.
+vpc:
+  id: "$VPC_ID"
+  subnets:
+    private:
+      us-east-1a:
+        id: "$APP_1A"
+      us-east-1b:
+        id: "$APP_1B"
+    public:
+      us-east-1a:
+        id: "$PUB_1A"
+      us-east-1b:
+        id: "$PUB_1B"
+
+managedNodeGroups:
+  - name: freshbox-nodegroup
+    instanceType: t4g.small
+    desiredCapacity: 2
+    minSize: 2
+    maxSize: 4
+    privateNetworking: true
+    securityGroups:
+      attachIDs: ["$SG_EKS"]
+    iam:
+      instanceRoleARN: "arn:aws:iam::${ACCOUNT_ID}:role/LabRole"
+EOF
+
+# 3. Lanzar la creación.
 eksctl create cluster -f cluster.yaml
 
 # Verificación post-creación solicitada.
