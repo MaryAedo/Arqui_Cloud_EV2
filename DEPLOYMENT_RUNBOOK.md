@@ -431,61 +431,66 @@ git push origin main
 
 ## 5. Fase 4: clúster Amazon EKS y cargas de trabajo
 
-### 5.1 Configuración de `cluster.yaml`
+### 5.1 Configuración declarativa de `cluster.yaml`
 
-Crear `cluster.yaml` localmente (no es necesario subirlo si contiene
-información específica de una sesión):
+Se utiliza `eksctl` con un archivo declarativo porque permite versionar y
+reproducir la topología del clúster, las subredes, el grupo de nodos y sus
+capacidades sin depender de una secuencia manual en la consola. Además,
+`eksctl` coordina la creación de EKS, Managed Node Groups, IAM y CloudFormation
+con una única operación auditable.
+
+El archivo [`k8s/cluster.yaml`](k8s/cluster.yaml) define el clúster
+`freshbox-cluster` en `us-east-1`, Kubernetes `1.30`, las subredes privadas de
+aplicación y las subredes públicas para los balanceadores. Los placeholders
+evitan guardar IDs específicos de una sesión del Learner Lab en el repositorio.
+
+Antes de crear el clúster, resuelve los IDs de la VPC, subredes, Security Group
+de EKS y el ARN del rol preexistente `LabRole`:
 
 ```bash
-cat > cluster.yaml <<EOF
-apiVersion: eksctl.io/v1alpha5
-kind: ClusterConfig
+export CLUSTER_NAME="freshbox-cluster"
+export REGION="us-east-1"
+export VPC_ID="${VPC_ID:?Define VPC_ID de la Fase 1}"
+export APP_SUBNET_A="${APP_SUBNET_A:?Define APP_SUBNET_A de la Fase 1}"
+export APP_SUBNET_B="${APP_SUBNET_B:?Define APP_SUBNET_B de la Fase 1}"
+export PUBLIC_SUBNET_A="${PUBLIC_SUBNET_A:?Define PUBLIC_SUBNET_A de la Fase 1}"
+export PUBLIC_SUBNET_B="${PUBLIC_SUBNET_B:?Define PUBLIC_SUBNET_B de la Fase 1}"
+export SG_EKS="${SG_EKS:?Define SG_EKS de la Fase 1}"
+export LAB_ROLE_ARN="$(aws iam get-role \
+  --role-name LabRole \
+  --query 'Role.Arn' \
+  --output text)"
 
-metadata:
-  name: ${PROJECT}-eks
-  region: ${REGION}
-  version: "1.31"
+sed -i \
+  -e "s#VPC_ID_PLACEHOLDER#$VPC_ID#g" \
+  -e "s#APP_SUBNET_A_PLACEHOLDER#$APP_SUBNET_A#g" \
+  -e "s#APP_SUBNET_B_PLACEHOLDER#$APP_SUBNET_B#g" \
+  -e "s#PUBLIC_SUBNET_A_PLACEHOLDER#$PUBLIC_SUBNET_A#g" \
+  -e "s#PUBLIC_SUBNET_B_PLACEHOLDER#$PUBLIC_SUBNET_B#g" \
+  -e "s#LAB_ROLE_ARN_PLACEHOLDER#$LAB_ROLE_ARN#g" \
+  -e "s#SG_EKS_PLACEHOLDER#$SG_EKS#g" \
+  k8s/cluster.yaml
 
-iam:
-  withOIDC: true
+# Aprovisionamiento declarativo exacto del clúster.
+eksctl create cluster -f k8s/cluster.yaml
 
-vpc:
-  id: ${VPC_ID}
-  subnets:
-    private:
-      ${AZ1}:
-        id: ${APP_SUBNET_A}
-      ${AZ2}:
-        id: ${APP_SUBNET_B}
-    public:
-      ${AZ1}:
-        id: ${PUBLIC_SUBNET_A}
-      ${AZ2}:
-        id: ${PUBLIC_SUBNET_B}
+# Verificación post-creación solicitada.
+aws eks describe-cluster \
+  --name freshbox-cluster \
+  --query "cluster.status" \
+  --region us-east-1
 
-managedNodeGroups:
-  - name: ${PROJECT}-graviton
-    instanceType: t4g.small
-    amiFamily: AmazonLinux2023
-    privateNetworking: true
-    minSize: 2
-    desiredCapacity: 2
-    maxSize: 4
-    volumeSize: 20
-    ssh:
-      allow: false
-    labels:
-      workload: freshbox
-EOF
-
-eksctl create cluster -f cluster.yaml
-aws eks update-kubeconfig --region "$REGION" \
-  --name "${PROJECT}-eks"
+aws eks update-kubeconfig \
+  --region "$REGION" \
+  --name "$CLUSTER_NAME"
 ```
 
-> Verifica la versión de Kubernetes disponible en Learner Lab antes de crear
-> el clúster. Si `1.31` no está disponible, sustituye `metadata.version` por
-> una versión soportada por `eksctl`.
+Los Managed Node Groups con `t4g.small` usan Graviton ARM64. Frente a
+instancias x86 equivalentes, ofrecen una relación costo/rendimiento favorable
+para cargas de microservicios, reducen el costo operativo del clúster y
+presentan un consumo térmico y energético menor. La capacidad deseada es de
+2 nodos, con escalamiento administrado entre 2 y 4, y los nodos usan
+`privateNetworking: true` para no recibir direcciones públicas.
 
 ### 5.2 Preparar y aplicar los manifiestos
 
@@ -529,7 +534,7 @@ El controlador necesita OIDC y permisos IAM. En Learner Lab, `eksctl` puede
 crear la política/rol asociado si la cuenta tiene permisos IAM suficientes.
 
 ```bash
-export CLUSTER_NAME="${PROJECT}-eks"
+export CLUSTER_NAME="freshbox-cluster"
 
 eksctl utils associate-iam-oidc-provider \
   --region "$REGION" \

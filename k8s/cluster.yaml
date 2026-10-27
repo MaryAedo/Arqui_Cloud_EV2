@@ -1,0 +1,42 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: freshbox-cluster
+  region: us-east-1
+  version: "1.30"
+
+iam:
+  withOIDC: true
+
+vpc:
+  id: VPC_ID_PLACEHOLDER
+  subnets:
+    private:
+      us-east-1a:
+        id: APP_SUBNET_A_PLACEHOLDER
+      us-east-1b:
+        id: APP_SUBNET_B_PLACEHOLDER
+    public:
+      us-east-1a:
+        id: PUBLIC_SUBNET_A_PLACEHOLDER
+      us-east-1b:
+        id: PUBLIC_SUBNET_B_PLACEHOLDER
+
+managedNodeGroups:
+  - name: freshbox-nodegroup
+    instanceType: t4g.small
+    amiFamily: AmazonLinux2023
+    privateNetworking: true
+    minSize: 2
+    desiredCapacity: 2
+    maxSize: 4
+    volumeSize: 20
+    iam:
+      instanceRoleARN: LAB_ROLE_ARN_PLACEHOLDER
+    securityGroups:
+      attachIDs:
+        - SG_EKS_PLACEHOLDER
+    labels:
+      workload: freshbox
+      architecture: arm64
