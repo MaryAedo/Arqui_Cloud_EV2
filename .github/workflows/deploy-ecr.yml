@@ -1,0 +1,73 @@
+name: Build and Push to Amazon ECR
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (Soporte ARM64 para Graviton)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and Push Frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./microservicioEKSFrontend
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/freshbox-frontend:latest
+
+      - name: Build and Push get-products
+        uses: docker/build-push-action@v5
+        with:
+          context: ./microserviciosEKSBackend/get-products
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/freshbox-get-products:latest
+
+      - name: Build and Push create-product
+        uses: docker/build-push-action@v5
+        with:
+          context: ./microserviciosEKSBackend/create-product
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/freshbox-create-product:latest
+
+      - name: Build and Push update-product
+        uses: docker/build-push-action@v5
+        with:
+          context: ./microserviciosEKSBackend/update-product
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/freshbox-update-product:latest
+
+      - name: Build and Push delete-product
+        uses: docker/build-push-action@v5
+        with:
+          context: ./microserviciosEKSBackend/delete-product
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/freshbox-delete-product:latest
