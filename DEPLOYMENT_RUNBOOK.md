@@ -440,7 +440,7 @@ capacidades sin depender de una secuencia manual en la consola. Además,
 con una única operación auditable.
 
 El archivo [`k8s/cluster.yaml`](k8s/cluster.yaml) define el clúster
-`freshbox-cluster` en `us-east-1`, Kubernetes `1.30`, las subredes privadas de
+`freshbox-cluster` en `us-east-1`, Kubernetes `1.31`, las subredes privadas de
 aplicación y las subredes públicas para los balanceadores. Los placeholders
 evitan guardar IDs específicos de una sesión del Learner Lab en el repositorio.
 
@@ -465,9 +465,8 @@ echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
 eksctl version
 ```
 
-Ejecuta estos comandos desde la raíz del repositorio para que la ruta del
-archivo declarativo sea `k8s/cluster.yaml`. Si CloudShell contiene el archivo
-en el directorio actual, también puedes usar `-f cluster.yaml`.
+Ejecuta la sustitución de placeholders desde la raíz del repositorio. Después
+entra en `k8s/` para ejecutar los comandos solicitados sobre `cluster.yaml`.
 
 Antes de crear el clúster, resuelve los IDs de la VPC, subredes, Security Group
 de EKS y el ARN del rol preexistente `LabRole`:
@@ -496,12 +495,16 @@ sed -i \
   -e "s#SG_EKS_PLACEHOLDER#$SG_EKS#g" \
   k8s/cluster.yaml
 
-# Aprovisionamiento declarativo exacto del clúster.
-# 3. Lanzar la creación del clúster EKS con el archivo cluster.yaml.
-eksctl create cluster -f k8s/cluster.yaml
+cd k8s
 
-# Alternativa si previamente copiaste k8s/cluster.yaml al directorio actual:
-# eksctl create cluster -f cluster.yaml
+# 1. Actualizar la versión a 1.31 en cluster.yaml.
+sed -i 's/version: "1.30"/version: "1.31"/' cluster.yaml
+
+# Verificar que quedó en 1.31.
+grep "version:" cluster.yaml
+
+# 2. Lanzar la creación del clúster EKS.
+eksctl create cluster -f cluster.yaml
 
 # Verificación post-creación solicitada.
 aws eks describe-cluster \
